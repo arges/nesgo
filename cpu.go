@@ -49,6 +49,8 @@ const (
 func (c *Cpu) getValueByMode(mode AddressingMode) (uint8, string) {
 
 	switch mode {
+	case MODE_IMP:
+		return 0, ""
 	case MODE_IMM:
 		value := c.Memory[c.PC+1]
 		return value, "#$%02x"
@@ -75,7 +77,7 @@ func (c *Cpu) getValueByMode(mode AddressingMode) (uint8, string) {
 	case MODE_ABY:
 		return 0, "a,y" // FIXME
 	case MODE_IND:
-		return 0, "(a)" // FIXME
+		return 0, "(%04x)" // FIXME
 	case MODE_REL:
 		value := c.Memory[c.PC+1]
 		return value, "%02x"
@@ -133,9 +135,7 @@ func (c *Cpu) Print() {
 
 // ExecuteAdc - Add memory to accumulator with carry - A + M + C -> A, C
 func ExecuteAdc(c *Cpu, value uint8) {
-	// clobber flags
-	c.Flags.N, c.Flags.Z, c.Flags.C, c.Flags.V = false, false, false, false
-
+	// store initial A value
 	initial := c.A
 
 	// add with carry
@@ -145,44 +145,31 @@ func ExecuteAdc(c *Cpu, value uint8) {
 	}
 
 	// check for carry
-	c.Flags.C = false
-	if c.A < initial {
-		c.Flags.C = true
-	}
+	c.Flags.C = c.A < initial
 
 	// check for overflow
-
+	c.Flags.V = ((initial^value)&0x80) > 0 && ((initial^c.A)&0x80) > 0
 
 	// update Negative flag
-	if (c.A & 0x80) == 0x80 {
-		c.Flags.N = true
-	}
+	c.Flags.N = ((c.A & 0x80) == 0x80)
 
 	// update Zero flag
-	if c.A == 0 {
-		c.Flags.Z = true
-	}
+	c.Flags.Z = c.A == 0
 }
 
 // ExecuteAnd - "AND" memory with accumulator - A & M -> A
 func ExecuteAnd(c *Cpu, value uint8) {
-	// clobber flags
-	c.Flags.N, c.Flags.Z = false, false
-
 	// and value
 	c.A = c.A & value
 
 	// update Negative flag
-	if (c.A & 0x80) == 0x80 {
-		c.Flags.N = true
-	}
+	c.Flags.N = ((c.A & 0x80) == 0x80)
 
 	// update Zero flag
-	if c.A == 0 {
-		c.Flags.Z = true
-	}
+	c.Flags.Z = c.A == 0
 }
 
+// ExecuteOra
 func ExecuteOra(c *Cpu, value uint8) {
 	// clobber flags
 	c.Flags.N, c.Flags.Z = false, false
@@ -191,37 +178,28 @@ func ExecuteOra(c *Cpu, value uint8) {
 	c.A = c.A | value
 
 	// update Negative flag
-	if (c.A & 0x80) == 0x80 {
-		c.Flags.N = true
-	}
+	c.Flags.N = ((c.A & 0x80) == 0x80)
 
 	// update Zero flag
-	if c.A == 0 {
-		c.Flags.Z = true
-	}
+	c.Flags.Z = c.A == 0
 }
 
+// ExecuteAsl
 func ExecuteAsl(c *Cpu, value uint8) {
 	// clobber flags
 	c.Flags.N, c.Flags.Z, c.Flags.C = false, false, false
 
 	// determine if carry should be set
-	if value&0x80 == 0x80 {
-		c.Flags.C = true
-	}
+	c.Flags.C = value&0x80 == 0x80
 
 	// rotate left by 1 and mask out low bit
 	bits.RotateLeft8(value&0xfe, 1)
 
 	// update Negative flag
-	if (c.A & 0x80) == 0x80 {
-		c.Flags.N = true
-	}
+	c.Flags.N = ((c.A & 0x80) == 0x80)
 
 	// update Zero flag
-	if c.A == 0 {
-		c.Flags.Z = true
-	}
+	c.Flags.Z = c.A == 0
 }
 
 func ExecuteBcc(c *Cpu, value uint8) {
@@ -239,6 +217,26 @@ func ExecuteBcs(c *Cpu, value uint8) {
 		//c.PC = c.PC + value
 
 	}
+}
+
+// ExecuteClc
+func ExecuteClc(c *Cpu, value uint8) {
+	c.Flags.C = false
+}
+
+// ExecuteCld
+func ExecuteCld(c *Cpu, value uint8) {
+	c.Flags.D = false
+}
+
+// ExecuteCli
+func ExecuteCli(c *Cpu, value uint8) {
+	c.Flags.I = false
+}
+
+// ExecuteClv
+func ExecuteClv(c *Cpu, value uint8) {
+	c.Flags.V = false
 }
 
 type Instruction struct {
@@ -276,7 +274,6 @@ var instructionMap = map[uint8]Instruction{
 	0x0e: Instruction{"ASL", MODE_ABS, 3, 6, ExecuteAsl},
 	0x1e: Instruction{"ASL", MODE_ABX, 3, 7, ExecuteAsl},
 
-	//
 	0x90: Instruction{"BCC", MODE_REL, 2, 2, ExecuteBcc},
 	0xb0: Instruction{"BCS", MODE_REL, 2, 2, ExecuteBcs},
 	/*0xf0: Instruction{"BEQ", MODE_REL, 2, 2, ExecuteBeq},
@@ -286,6 +283,49 @@ var instructionMap = map[uint8]Instruction{
 
 	0x30: Instruction{"BMI", MODE_REL, 2, 2, ExecuteBmi},
 	0xd0: Instruction{"BNE", MODE_REL, 2, 2, ExecuteBne},
+	0x10: Instruction{"BPL", MODE_REL, 2, 2, ExecuteBpl},
+	0x00: Instruction{"BRK", MODE_IMP, 1, 7, ExecuteBrk},
+	0x50: Instruction{"BVC", MODE_REL, 2, 2, ExecuteBvc},
+	0x70: Instruction{"BVS", MODE_REL, 2, 2, ExecuteBvs},
+
+	0x18: Instruction{"CLC", MODE_IMP, 1, 2, ExecuteClc},
+	0xd8: Instruction{"CLD", MODE_IMP, 1, 2, ExecuteCld},
+	0x58: Instruction{"CLI", MODE_IMP, 1, 2, ExecuteCli},
+	0xb8: Instruction{"CLV", MODE_IMP, 1, 2, ExecuteClv},
+
+	0xc9: Instruction{"CMP", MODE_IMM, 2, 2, ExecuteCmp},
+	0xc5: Instruction{"CMP", MODE_ZEP, 2, 3, ExecuteCmp},
+	0xd5: Instruction{"CMP", MODE_ZPX, 2, 4, ExecuteCmp},
+	0xcD: Instruction{"CMP", MODE_ABS, 3, 4, ExecuteCmp},
+	0xdd: Instruction{"CMP", MODE_ABX, 3, 4, ExecuteCmp},
+	0xd9: Instruction{"CMP", MODE_ABY, 3, 4, ExecuteCmp},
+	0xc1: Instruction{"CMP", MODE_IZX, 2, 6, ExecuteCmp},
+	0xd1: Instruction{"CMP", MODE_IZY, 2, 5, ExecuteCmp},
+
+	0xe0: Instruction{"CPX", MODE_IMM, 2, 5, ExecuteCpx},
+	0xe4: Instruction{"CPX", MODE_ZEP, 2, 3, ExecuteCpx},
+	0xec: Instruction{"CPX", MODE_ABS, 3, 4, ExecuteCpx},
+
+	0xc0: Instruction{"CPY", MODE_IMM, 2, 5, ExecuteCpy},
+	0xc4: Instruction{"CPY", MODE_ZEP, 2, 3, ExecuteCpy},
+	0xcc: Instruction{"CPY", MODE_ABS, 3, 4, ExecuteCpy},
+
+	0xc6: Instruction{"DEC", MODE_ZEP, 2, 5, ExecuteDec},
+	0xd6: Instruction{"DEC", MODE_ZPX, 2, 6, ExecuteDec},
+	0xce: Instruction{"DEC", MODE_ABS, 3, 6, ExecuteDec},
+	0xde: Instruction{"DEC", MODE_ABX, 3, 7, ExecuteDec},
+
+	0xca: Instruction{"DEX", MODE_IMP, 1, 2, ExecuteDex},
+	0x88: Instruction{"DEY", MODE_IMP, 1, 2, ExecuteDey},
+
+	0x49: Instruction{"EOR", MODE_IMM, 2, 2, ExecuteEor},
+	0x45: Instruction{"EOR", MODE_ZEP, 2, 3, ExecuteEor},
+	0x55: Instruction{"EOR", MODE_ZPX, 2, 4, ExecuteEor},
+	0x40: Instruction{"EOR", MODE_ABS, 3, 4, ExecuteEor},
+	0x50: Instruction{"EOR", MODE_ABX, 3, 4, ExecuteEor},
+	0x59: Instruction{"EOR", MODE_ABY, 3, 4, ExecuteEor},
+	0x41: Instruction{"EOR", MODE_IZX, 2, 6, ExecuteEor},
+	0x51: Instruction{"EOR", MODE_IZY, 2, 5, ExecuteEor},
 	*/
 
 	//
@@ -303,13 +343,4 @@ func (c *Cpu) Step() {
 	inst := instructionMap[c.Memory[c.PC]]
 	c.Execute(inst)
 	c.Print()
-}
-
-func main() {
-	c := Cpu{}
-	c.Memory[0] = 0x29
-	c.Memory[1] = 0x19
-	c.A = 0x19
-
-	c.Step()
 }
